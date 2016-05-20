@@ -91,7 +91,7 @@ public class ClienteFrame extends ProcesoFrame implements ActionListener {
         botonLibRed.addActionListener(this);
         panelContenedor.add(botonLibRed);
 
-        //bloquearBotonesLiberar();
+        bloquearBotonesLiberar();
 
         return panelContenedor;
 

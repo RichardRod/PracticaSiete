@@ -3,191 +3,229 @@ package sistemaDistribuido.sistema.exclusion.modoUsuario;
 
 import sistemaDistribuido.sistema.clienteServidor.modoMonitor.Nucleo;
 import sistemaDistribuido.sistema.clienteServidor.modoUsuario.Proceso;
-import sistemaDistribuido.sistema.exclusion.modoUsuario.recursos.Memoria;
-import sistemaDistribuido.sistema.exclusion.modoUsuario.recursos.Recurso;
 import sistemaDistribuido.util.Escribano;
-import sistemaDistribuido.visual.exclusion.VentanaRegiones;
 
-import javax.swing.table.DefaultTableModel;
 
 public class ProcesoServidor extends Proceso {
 
     //atributos
-    private final byte MEMORIA = 0;
-    private final byte IMPRESORA = 1;
-    private final byte DISCO = 2;
-    private final byte RED = 3;
-    private final byte LIBERAR_MEMORIA = 4;
-    private final byte LIBERAR_IMPRESORA = 5;
-    private final byte LIBERAR_DISCO = 6;
-    private final byte LIBERAR_RED = 7;
-
-    byte[] solServidor = new byte[1024];
-    byte[] respServidor = new byte[1024];
+    Recursos recursos;
 
     //constructor
     public ProcesoServidor(Escribano esc) {
         super(esc);
         start();
+
+        recursos = new Recursos();
     }//fin del constructor
 
     @Override
     public void run() {
-        imprimeln("Servidor administrador de recursos iniciado.");
 
-        byte recurso;
-        byte idOrigen;
+        byte[] solServidor = new byte[1024];
 
-        boolean correcto;
+        imprimeln("Proceso servidor en ejecucion");
 
-        while (continuar()) {
+        while(continuar())
+        {
             imprimeln("Invocando a receive()");
             Nucleo.receive(dameID(), solServidor);
 
-            recurso = solServidor[8];
-            idOrigen = solServidor[0];
+            imprimeln("Paquete recibido");
+            imprimeln("Ejecutando peticion");
 
-            imprimeln("Recurso solicitado: " + recursoCadena(recurso) + " por el proceso: " + idOrigen);
-            correcto = establecerAccion(recurso, idOrigen);
+            short tipoSolicitud = obtenerSolicitud(solServidor);
+            int destino = obtenerCliente(solServidor);
 
-            if (correcto) {
-                String respuesta = "Recurso asignado";
-                //empacar respuesta
-                for (int i = 0; i < respuesta.length(); i++) {
-                    respServidor[i + 8] = (byte) respuesta.charAt(i);
-                }//fin de for
+            byte[] respuesta;
 
-                imprimeln("Senialamiento al nucleo para envio de mensaje");
-                Nucleo.send(idOrigen, respServidor);
-                imprimeln("Correcto.");
-            }//fin de if
-            else {
-                String respuesta = "Recurso Ocupado";
-                //empacar respuesta
-                for (int i = 0; i < respuesta.length(); i++) {
-                    respServidor[i + 8] = (byte) respuesta.charAt(i);
-                }//fin de for
+            System.out.println("Solicitud: " + tipoSolicitud);
+            switch (tipoSolicitud)
+            {
+                case Recursos.ESPERAR: //esperando recurso
+                    imprimeln("Esperando disponibilidad.");
+                    break;
 
-                imprimeln("Senialamiento al nucleo para envio de mensaje");
-                Nucleo.send(idOrigen, respServidor);
-                imprimeln("Correcto.");
-            }//fin de else
+                case Recursos.SOL_MEMORIA: //solicitud memoria
+                    if(!recursos.isMemoriaLibre())
+                    {
+                        establecerRecurso(Recursos.MEMORIA);
+                        respuesta = empaquetarSolicitud((short)1);
+                    }//fin de if
+                    else
+                    {
+                        imprimeln("Recurso solicitado ocupado");
+                        guardarSolicitud(Recursos.MEMORIA, solServidor);
+                        respuesta = empaquetarSolicitud((short)2);
+                    }//fin de else
+
+                    imprimeln("Enviando respuesta al cliente.");
+                    Nucleo.send(destino, respuesta);
+                    break;
+
+                case 201:
+
+                    break;
+
+                case 202:
+
+                    break;
+
+                case 203:
+
+                    break;
+            }//fin de switch
+
 
         }//fin de while
+
     }//fin del metodo run
 
-    public boolean establecerAccion(byte recurso, byte idClienteSolicitante) {
+    private byte[] empaquetarSolicitud(short paquete)
+    {
+        byte[] respuestaOcupado = new byte[12];
+        byte[] respuestaLibre = new byte[2];
 
-        DefaultTableModel modeloRecursoUso = (DefaultTableModel) VentanaRegiones.tablaRecursosUso.getModel();
-        Object[] filas = new Object[4];
-        boolean correcto = false;
+        imprimeln("Generando Respuesta");
 
-        switch (recurso) {
-            case MEMORIA:
-                correcto = agregarMemoria(idClienteSolicitante);
+        if(paquete == 1) {
+            respuestaLibre = empacarCorto((short)1); //recurso libre
+        } else if(paquete == 2) {
+            respuestaLibre = empacarCorto((short)2); //recurso ocupado
+        } else {
+            imprimeln("Error: " + paquete);
+        }
+
+        System.arraycopy(respuestaLibre, 0, respuestaOcupado, 10, 2);
+
+        return respuestaOcupado;
+    }//fin del metodo empaquetarSolicitud
+
+    private void guardarSolicitud(int tipoRecurso, byte[] mensaje)
+    {
+        byte[] solicitud = new byte[mensaje.length];
+        System.arraycopy(mensaje, 0, solicitud, 0, mensaje.length);
+
+        switch (tipoRecurso)
+        {
+            case Recursos.MEMORIA:
+                recursos.encolarMemoria(solicitud);
                 break;
 
-            case LIBERAR_MEMORIA:
-                imprimeln("Liberar Recurso: Memoria por el proceso: " + idClienteSolicitante);
-
-                correcto = Recurso.liberarMemoria(idClienteSolicitante);
-                filas[0] = " ";
-
-                modeloRecursoUso.removeRow(0);
-                modeloRecursoUso.addRow(filas);
-                VentanaRegiones.tablaRecursosUso.setModel(modeloRecursoUso);
-                VentanaRegiones.tablaRecursosUso.addNotify();
-                Recurso.actualizarMemoria(respServidor);
+            case Recursos.IMPRESORA:
+                recursos.encolarImpresora(solicitud);
                 break;
 
-            case IMPRESORA:
-
+            case Recursos.DISCO:
+                recursos.encolarDisco(solicitud);
                 break;
 
-            case LIBERAR_IMPRESORA:
-
-                break;
-
-            case DISCO:
-
-                break;
-
-            case LIBERAR_DISCO:
-
-                break;
-
-            case RED:
-
-                break;
-
-            case LIBERAR_RED:
-
+            case Recursos.RED:
+                recursos.encolarRed(solicitud);
                 break;
         }//fin de switch
 
-        return correcto;
+    }//fin del metodo guardarSolicitud
 
+    private short obtenerSolicitud(byte[] solicitud)
+    {
+        short tipoMensaje;
+        byte[] mensaje = new byte[2];
+
+        System.arraycopy(solicitud, 10, mensaje, 0, 2);
+        tipoMensaje = desempacarCorto(mensaje);
+
+        return tipoMensaje;
+    }//fin del metodo obtenerSolicitud
+
+    private void enviarMensaje(int destino, byte[] mensaje)
+    {
+        imprimeln("Enviando mensaje");
+        Nucleo.send(destino, mensaje);
+    }//fin del metodo enviarMensaje
+
+    private void establecerRecurso(short recurso)
+    {
+        imprimeln("Estableciendo recurso");
+
+        switch (recurso)
+        {
+            case Recursos.MEMORIA:
+                imprimeln("Memoria asignada");
+                recursos.setMemoriaLibre(true);
+                break;
+
+            case Recursos.IMPRESORA:
+                imprimeln("Impresora asignada");
+                recursos.setImpresoraLibre(true);
+                break;
+
+            case Recursos.DISCO:
+                imprimeln("Disco asignada");
+                recursos.setDiscoLibre(true);
+                break;
+
+            case Recursos.RED:
+                imprimeln("Red asignada");
+                recursos.setRedLibre(true);
+                break;
+        }//fin de switch
     }//fin del metodo establecerRecurso
 
-    public String recursoCadena(byte recurso) {
-        String rec = "";
+    private void liberarRecurso(short recurso)
+    {
+        imprimeln("Liberando recurso");
 
-        switch (recurso) {
-            case MEMORIA:
-                rec = "Memoria";
+        switch (recurso)
+        {
+            case Recursos.MEMORIA:
+                imprimeln("Memoria liberada");
+                recursos.setMemoriaLibre(false);
                 break;
 
-            case IMPRESORA:
-                rec = "Impresora";
+            case Recursos.IMPRESORA:
+                imprimeln("Impresora liberada");
+                recursos.setImpresoraLibre(false);
                 break;
 
-            case DISCO:
-                rec = "Disco";
+            case Recursos.DISCO:
+                imprimeln("Disco liberado");
+                recursos.setDiscoLibre(false);
                 break;
 
-            case RED:
-                rec = "Red";
+            case Recursos.RED:
+                imprimeln("Red liberada");
+                recursos.setRedLibre(false);
                 break;
+        }//fin de switch
+    }//fin del metodo liberarRecurso
 
-            case LIBERAR_MEMORIA:
-                rec = "Liberar Memoria";
-                break;
-        }
+    private byte[] empacarCorto(short valor) {
+        byte[] arreglo = new byte[2];
 
-        return rec;
+        arreglo[0] = (byte) (valor >> 8);
+        arreglo[1] = (byte) valor;
+
+        return arreglo;
+    }//fin del metodo empacarCorto
+
+    private short desempacarCorto(byte[] arreglo) {
+        short valor;
+        valor = (short)((arreglo[1] & 0x00FF) | (arreglo[0] << 8 & 0xFF00));
+
+        return valor;
+    }//fin del metodo desempacarCorto
+
+    private int obtenerCliente(byte[] solicitud) {
+        byte[] origen = new byte[4];
+        System.arraycopy(solicitud, 0, origen, 0, 4);
+        return desempacarEntero(origen);
     }
 
-    public boolean agregarMemoria(int proceso) {
-        DefaultTableModel modeloRecursoUso = (DefaultTableModel) VentanaRegiones.tablaRecursosUso.getModel();
-        Object[] filas = new Object[4];
-        boolean correcto;
-        if (Recurso.agregarMemoria(proceso)) {
-            imprimeln("Recurso solicitado disponible.");
+    private int desempacarEntero(byte[] arreglo) {
+        int valor = (int)((arreglo[3] & 0x000000FF) | (arreglo[2] << 8 & 0x0000FF00) | (arreglo[1] << 16 & 0x00FF0000) | (arreglo[0] << 24 & 0xFF000000));
 
-            filas[0] = "Proceso: " + proceso;
-
-            if (modeloRecursoUso.getRowCount() > 0)
-                modeloRecursoUso.removeRow(0);
-
-            modeloRecursoUso.addRow(filas);
-            VentanaRegiones.tablaRecursosUso.setModel(modeloRecursoUso);
-            correcto = true;
-        }//fin de if
-        else {
-            imprimeln("Recurso solicitado ocupado.");
-
-            DefaultTableModel modeloMemoria = (DefaultTableModel) VentanaRegiones.tablaMemoria.getModel();
-            Object[] filasMemoria = new Object[1];
-
-            filasMemoria[0] = "Proceso: " + proceso;
-
-            modeloMemoria.addRow(filasMemoria);
-            VentanaRegiones.tablaMemoria.setModel(modeloMemoria);
-
-            correcto = false;
-
-        }//fin de else
-
-        return correcto;
+        return valor;
     }
-}
+
+}//fin de la clase ProcesoServidor
